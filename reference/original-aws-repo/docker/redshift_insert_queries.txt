@@ -1,0 +1,47 @@
+-- Create the patients vitals table
+CREATE TABLE IF NOT EXISTS public.patient_vitals (
+    patient_id INT,
+    heart_rate INT,
+    systolic_bp INT,
+    diastolic_bp INT,
+    temperature FLOAT,
+    respiration_rate INT,
+    spo2 FLOAT,
+    date_time TIMESTAMP
+);
+
+-- Create the alerts table
+CREATE TABLE IF NOT EXISTS public.alerts (
+    patient_id INT,
+    alert_metric VARCHAR(255),
+    value FLOAT,
+    threshold_range VARCHAR(255),
+    alert_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- Copy data from CSV file into the patients vitals table
+COPY public.patient_vitals
+FROM
+  's3://patient-vital-monitoring-system/patient_vitals_3nights.csv' 
+  iam_role 'arn:aws:iam::903187628715:role/myRedshiftRole' 
+  DELIMITER ',' 
+  IGNOREHEADER 1 CSV;
+
+
+-- Create the patients table
+CREATE TABLE public.patients (
+    patient_id INT PRIMARY KEY,
+    patient_name VARCHAR(255),
+    phone_number VARCHAR(20),
+    age INT,
+    admitted_ward INT,
+    address VARCHAR(255)
+);
+
+-- Copy data from CSV file into the patients table
+COPY public.patients FROM 's3://patient-vital-monitoring-system/patient_info.csv'
+CREDENTIALS 'arn:aws:iam::903187628715:role/myRedshiftRole'
+IGNOREHEADER 1 CSV
+DELIMITER ','
+;

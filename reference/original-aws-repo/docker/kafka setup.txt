@@ -1,0 +1,29 @@
+wget https://downloads.apache.org/kafka/3.6.0/kafka_2.12-3.6.0.tgz
+tar -xvf kafka_2.12-3.6.0.tgz
+
+cd kafka_2.12-3.6.0
+bin/zookeeper-server-start.sh config/zookeeper.properties
+
+# New terminal
+cd kafka_2.12-3.6.0
+bin/kafka-server-start.sh config/server.properties
+
+# New terminal
+cd kafka_2.12-3.6.0
+bin/kafka-topics.sh --create --topic patientvitals --bootstrap-server localhost:9092
+
+aws s3 cp s3://patient-vital-monitoring-system/producer.py .
+
+sudo python3 -m pip install kafka-python scipy boto3 pandas
+
+python producer.py
+
+# New terminal
+aws s3 cp s3://patient-vital-monitoring-system/consumer.py .
+spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 consumer.py ec2-54-172-135-149.compute-1.amazonaws.com
+
+------------------------------------------------------------
+# New terminal
+cd kafka_2.12-3.6.0
+
+bin/kafka-console-consumer.sh --bootstrap-server ec2-3-87-218-103.compute-1.amazonaws.com:9092 --topic patientvitals

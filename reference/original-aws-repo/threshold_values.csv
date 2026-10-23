@@ -1,0 +1,7 @@
+﻿Metric,Normal_low_val,Normal_high_val
+heartBeat,60,100
+systolicBP,90,120
+diastolicBP,60,80
+temperature,36.5,37.3
+respirationRate,12,20
+spO2,95,100

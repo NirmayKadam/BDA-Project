@@ -1,0 +1,15 @@
+# Dockerfile.consumer
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY consumer.py .
+COPY dependencies.txt .
+
+RUN apt-get update
+RUN apt-get install default-jdk -y
+
+RUN pip install -r ./dependencies.txt
+
+# CMD ["python", "consumer.py"]
+CMD ["spark-submit", "--master", "spark://spark:7077", "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0", "/app/consumer.py"]

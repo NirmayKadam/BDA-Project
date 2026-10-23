@@ -1,0 +1,13 @@
+FROM python:3.8-slim
+
+WORKDIR /app
+
+COPY producer.py .
+COPY dependencies.txt .
+
+RUN pip install kafka-python
+RUN pip install numpy
+RUN pip install scipy
+
+CMD ["python", "producer.py"]
+#CMD ["spark-submit", "--master", "spark://spark:7077", "/app/producer.py"]

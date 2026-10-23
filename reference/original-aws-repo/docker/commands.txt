@@ -1,0 +1,14 @@
+Docker commands:
+docker-compose up -d
+docker build -t producer -f Dockerfile.producer .
+docker build -t consumer -f Dockerfile.consumer .
+
+docker run --network=real-time-patient-vital-monitoring-system_default producer
+docker run --network=real-time-patient-vital-monitoring-system_default consumer
+
+On the EMR cluster:
+python s3://patient-vital-monitoring-system/producer.py
+#spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 s3://patient-vital-monitoring-system/consumer.py
+
+#cluster
+spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1 s3://patient-vital-monitoring-system/consumer.py

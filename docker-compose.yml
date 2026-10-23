@@ -1,0 +1,209 @@
+﻿name: patient-vitals-bda
+
+# Local, AWS-free version of the Real-Time Patient Vital Monitoring pipeline.
+#   producer -> Kafka -> Spark Structured Streaming -> HDFS (+ alerts back to Kafka) -> Streamlit dashboard
+# Start everything:  docker compose up -d --build
+# Dashboard:         http://localhost:8501
+
+x-hadoop-env: &hadoop-env
+  CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+  HDFS_CONF_dfs_replication: "1"
+  HDFS_CONF_dfs_permissions_enabled: "false"
+  HDFS_CONF_dfs_webhdfs_enabled: "true"
+  HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check: "false"
+
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: pv-kafka
+    ports:
+      - "29092:29092"   # for tools running on the host (optional)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: pv-namenode
+    ports:
+      - "9870:9870"     # HDFS web UI
+    environment:
+      <<: *hadoop-env
+      CLUSTER_NAME: patientvitals
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9870/ > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: pv-datanode
+    environment:
+      <<: *hadoop-env
+      SERVICE_PRECONDITION: "namenode:9870"
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+
+  spark-streaming:
+    image: apache/spark:3.5.3
+    container_name: pv-spark
+    user: root
+    ports:
+      - "4040:4040"     # Spark UI (while the job runs)
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      HDFS_BASE: hdfs://namenode:9000/patient_vitals
+    volumes:
+      - ./spark/stream_job.py:/app/stream_job.py:ro
+      - ./data/patients.csv:/data/patients.csv:ro
+      - spark_ivy:/tmp/ivy
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[2]
+      --conf spark.jars.ivy=/tmp/ivy
+      --conf spark.sql.shuffle.partitions=2
+      --conf spark.driver.memory=1g
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3
+      /app/stream_job.py
+    depends_on:
+      kafka:
+        condition: service_healthy
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_started
+    restart: on-failure
+
+  producer:
+    build: ./producer
+    container_name: pv-producer
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      MSGS_PER_SEC: "20"      # 10 patients -> a full "30s reading round" every ~0.5s
+      LOOP: "true"            # replay the 3-night file forever
+    volumes:
+      - ./data/patient_vitals_3nights.csv:/data/vitals.csv:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: on-failure
+
+  dashboard:
+    build: ./dashboard
+    container_name: pv-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      WEBHDFS: http://namenode:9870/webhdfs/v1
+      HDFS_ALERTS_DIR: /patient_vitals/alerts
+      HBASE_HOST: hbase
+    depends_on:
+      kafka:
+        condition: service_healthy
+      namenode:
+        condition: service_healthy
+    restart: on-failure
+
+  # ---------------- HBase: serving layer (fast lookups by patient) ----------------
+  hbase:
+    image: harisekhon/hbase:2.1
+    container_name: pv-hbase
+    hostname: hbase
+    ports:
+      - "16010:16010"   # HBase master UI
+
+  hbase-writer:
+    build: ./hbase-writer
+    container_name: pv-hbase-writer
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      HBASE_HOST: hbase
+    depends_on:
+      kafka:
+        condition: service_healthy
+      hbase:
+        condition: service_started
+    restart: on-failure
+
+  # ---------------- Hive: SQL warehouse over the files in HDFS ----------------
+  hive-metastore-db:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    container_name: pv-hive-metastore-db
+    volumes:
+      - hive_metastore_data:/var/lib/postgresql/data
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: pv-hive-metastore
+    environment: &hive-env
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionURL: jdbc:postgresql://hive-metastore-db/metastore
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName: org.postgresql.Driver
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName: hive
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword: hive
+      HIVE_SITE_CONF_datanucleus_autoCreateSchema: "false"
+      HIVE_SITE_CONF_hive_metastore_uris: thrift://hive-metastore:9083
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      HDFS_CONF_dfs_replication: "1"
+      SERVICE_PRECONDITION: "namenode:9870 hive-metastore-db:5432"
+    command: /opt/hive/bin/hive --service metastore
+    depends_on:
+      namenode:
+        condition: service_healthy
+      hive-metastore-db:
+        condition: service_started
+
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: pv-hive-server
+    ports:
+      - "10000:10000"   # HiveServer2 (JDBC / beeline)
+      - "10002:10002"   # HiveServer2 web UI
+    environment:
+      <<: *hive-env
+      SERVICE_PRECONDITION: "hive-metastore:9083"
+    depends_on:
+      - hive-metastore
+
+  # one-shot: creates the Hive database and tables once HiveServer2 accepts connections
+  hive-init:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: pv-hive-init
+    volumes:
+      - ./hive/init.sql:/init/init.sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        until beeline -u jdbc:hive2://hive-server:10000 -e "SHOW DATABASES" > /dev/null 2>&1; do
+          echo "waiting for HiveServer2..."; sleep 10; done
+        beeline -u jdbc:hive2://hive-server:10000 -f /init/init.sql && echo "Hive tables ready"
+    depends_on:
+      - hive-server
+    restart: "no"
+
+volumes:
+  hive_metastore_data:
+  namenode_data:
+  datanode_data:
+  spark_ivy:

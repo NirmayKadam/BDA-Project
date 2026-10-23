@@ -1,0 +1,20 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Spark / streaming runtime output (never commit)
+*_checkpoint/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Large generated data
+data/patients.csv
