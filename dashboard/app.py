@@ -30,7 +30,7 @@ def start_consumers():
         while consumer is None:
             try:
                 consumer = KafkaConsumer(topic, bootstrap_servers=KAFKA,
-                                         auto_offset_reset="latest",
+                                         auto_offset_reset="earliest",
                                          value_deserializer=lambda m: json.loads(m.decode()))
             except NoBrokersAvailable:
                 time.sleep(3)
@@ -142,8 +142,12 @@ def storage():
     if not hist.empty:
         st.caption(f"Alert history read back from HDFS ({len(hist)} rows from the newest files)")
         h1, h2 = st.columns(2)
-        h1.bar_chart(hist["admitted_ward"].astype(str).value_counts())
-        h2.bar_chart(hist["severity"].value_counts())
+        with h1:
+            st.caption("Alerts by admitted ward (x: ward number, y: alert count)")
+            st.bar_chart(hist["admitted_ward"].astype(str).value_counts())
+        with h2:
+            st.caption("Alerts by severity (CRITICAL vs WARNING)")
+            st.bar_chart(hist["severity"].value_counts())
 
 
 storage()

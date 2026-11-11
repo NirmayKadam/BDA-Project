@@ -16,5 +16,4 @@ spark-warehouse/
 metastore_db/
 derby.log
 
-# Large generated data
-data/patients.csv
+

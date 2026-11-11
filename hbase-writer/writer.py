@@ -44,7 +44,7 @@ def ensure_tables(conn):
 def consumer(topic):
     while True:
         try:
-            return KafkaConsumer(topic, bootstrap_servers=KAFKA, auto_offset_reset="latest",
+            return KafkaConsumer(topic, bootstrap_servers=KAFKA, auto_offset_reset="earliest",
                                  group_id=f"hbase-writer-{topic}",
                                  value_deserializer=lambda m: json.loads(m.decode()))
         except NoBrokersAvailable:
