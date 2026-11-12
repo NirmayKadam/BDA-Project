@@ -44,8 +44,16 @@ schema = StructType([
     StructField("event_time", StringType()),
 ])
 
-# Static patient master data (500k rows, only a handful are ever matched) -> broadcast join.
-patients = (spark.read.option("header", True).option("inferSchema", True)
+patient_schema = StructType([
+    StructField("patient_id", IntegerType()),
+    StructField("patient_name", StringType()),
+    StructField("age", IntegerType()),
+    StructField("admitted_ward", IntegerType()),
+    StructField("phone_number", StringType()),
+])
+
+# Static patient master data -> broadcast join.
+patients = (spark.read.option("header", True).schema(patient_schema)
             .csv("/data/patients.csv")
             .select("patient_id", "patient_name", "age", "admitted_ward", "phone_number"))
 
